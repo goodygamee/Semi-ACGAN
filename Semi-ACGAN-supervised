@@ -1,0 +1,180 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sun May 19 16:38:34 2019
+
+@author: 玉强
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Fri May 17 10:34:10 2019
+
+@author: 玉强
+"""
+import tensorflow as tf
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import LabelEncoder
+from tqdm import tqdm
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import StandardScaler
+
+#####################         data preprocessing           #################################
+kdd_new = pd.read_csv('D:/NNlearning/code/kddcup.data_new4',names=range(42))
+kdd_test = pd.read_csv('D:/NNlearning/code/kddcup.testdata_new4',names=range(42))
+kdd_test =kdd_test.drop([136488,136496],axis=0)
+y_train = kdd_new[41]
+del kdd_new[41]
+X_train = kdd_new
+
+y_test = kdd_test[41]
+del kdd_test[41]
+X_test = kdd_test
+
+
+label_enc = LabelEncoder()
+hot_enc = OneHotEncoder(sparse=False)
+
+label_enc.fit(y_train)
+y_train,y_test = label_enc.transform(y_train),label_enc.transform(y_test)
+y_train,y_test = y_train.reshape(-1,1),y_test.reshape(-1,1)
+
+hot_enc.fit(y_train)
+y_train,y_test = hot_enc.transform(y_train),hot_enc.transform(y_test)
+hot_enc = OneHotEncoder(categorical_features = [1,2,3,6,11,13,14,21],sparse=False)
+hot_enc.fit(X_train)
+
+X_train = hot_enc.transform(X_train)
+X_test = hot_enc.transform(X_test)
+scaler = StandardScaler()
+scaler.fit(X_train)
+X_train = scaler.transform(X_train)
+X_test =  scaler.transform(X_test)
+
+
+#############################   some constants and parameter   s#####################
+batch_size = 300
+z_dim = 124
+Label = 5
+LAMBDA = 10
+index_train = kdd_new.index
+index_test = kdd_test.index
+DIS_ITERS = 3#5
+is_training = True
+
+X = tf.placeholder(dtype=tf.float32,shape=[None,124],name='X')
+y_label = tf.placeholder(dtype=tf.float32,shape=[None,Label],name='y_label')
+noise = tf.placeholder(dtype=tf.float32,shape=[None,z_dim],name='noise')
+y_noise = tf.placeholder(dtype=tf.float32,shape=[None,Label],name='y_noise')
+
+X_t = tf.placeholder(dtype=tf.float32,shape=[None,124],name='X_t')
+keep_prob = tf.placeholder(tf.float32)
+#################################   functions  #################################
+def lrelu(x,leak=0.2):
+    return tf.maximum(x,leak*x)
+
+def sigmoid_cross_entropy_with_logits(x,y):
+    return tf.nn.sigmoid_cross_entropy_with_logits(logits=x,labels=y)
+
+
+def discriminator(X,reuse=None):
+    with tf.variable_scope('discriminator', reuse=reuse):
+        hd0 = tf.nn.dropout(tf.layers.dense(X, units=1024,activation=tf.nn.relu),keep_prob =1 )
+        hd1 = tf.nn.dropout(tf.layers.dense(hd0, units=248,activation=tf.nn.relu),keep_prob = 0.9)        
+        #hd2 = tf.nn.dropout(tf.layers.dense(hd1, units=124,activation=tf.nn.relu),keep_prob = 0.8)
+        #h3 = lrelu(tf.contrib.layers.batch_norm(h3, is_training=is_training, decay=momentum))
+        
+        Y_ = tf.layers.dense(hd1, units=Label)
+        hd4 = tf.layers.dense(hd0, units=1)
+        return hd4, Y_
+
+def predict(y_label,y_pred):
+    y_label = np.argmax(y_label,axis=1)
+    y_pred = np.argmax(y_pred,axis =1)
+    score = accuracy_score(y_label, y_pred)
+    print ("Accuracy score:",score)
+    return score
+    
+def generator(z, label, is_training=True):
+    with tf.variable_scope('generator', reuse=False):
+        z = tf.concat([z, label], axis=1)
+        h0 = tf.nn.dropout(tf.layers.dense(z, units=1024,activation=tf.nn.relu),keep_prob =1 )
+        h1 = tf.nn.dropout(tf.layers.dense(h0, units=248,activation=tf.nn.relu),keep_prob = 0.9)
+        #h2 = tf.nn.dropout(tf.layers.dense(h1, units=124,activation=tf.nn.relu),keep_prob = 0.8)
+    
+        h3 = tf.layers.dense(h0,units=124,activation=tf.nn.tanh)
+        return h3
+
+def get_random_batch(X,Y,index,batch_size=batch_size):
+    np.random.seed(1234)
+    ind = np.random.choice(index,(batch_size))
+    X_batch = X[ind]
+    Y_batch = Y[ind]    
+    return X_batch, Y_batch
+
+######################################  loss  ###################################
+g = generator(noise, y_label)
+print("维度： ",g.get_shape())
+d_real, y_real = discriminator(X)
+d_fake, y_fake = discriminator(g,reuse=True)
+
+_, y_real2 = discriminator(X_t,reuse=True)
+
+loss_d_real = -tf.reduce_mean(d_real)
+loss_d_fake = tf.reduce_mean(d_fake)
+
+loss_cls_real = tf.losses.mean_squared_error(y_label, y_real)
+loss_cls_fake = tf.losses.mean_squared_error(y_label, y_fake)
+
+
+loss_d = loss_d_real + loss_d_fake + loss_cls_real
+loss_g = -tf.reduce_mean(d_fake) + loss_cls_fake
+
+'''
+alpha = tf.random_uniform(shape=[batch_size, 1], minval=0., maxval=1.)
+interpolates = alpha * X + (1 - alpha) * g
+grad = tf.gradients(discriminator(interpolates, reuse=True), [interpolates])[0]
+slop = tf.sqrt(tf.reduce_sum(tf.square(grad), axis=[1]))
+gp = tf.reduce_mean((slop - 1.) ** 2)
+loss_d += LAMBDA * gp
+'''
+vars_g = [var for var in tf.trainable_variables() if var.name.startswith('generator')]
+vars_d = [var for var in tf.trainable_variables() if var.name.startswith('discriminator')]
+
+update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+with tf.control_dependencies(update_ops):
+    optimizer_d = tf.train.AdamOptimizer(learning_rate=0.0002, beta1=0.5).minimize(loss_d, var_list=vars_d)
+    optimizer_g = tf.train.AdamOptimizer(learning_rate=0.0002, beta1=0.5).minimize(loss_g, var_list=vars_g)
+    
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+
+loss = {'d': [], 'g': []}
+
+score = 0
+for i in tqdm(range(1000)):
+    for j in range(DIS_ITERS):
+        n = np.random.uniform(-1.0, 1.0, [batch_size, z_dim]).astype(np.float32)
+        X_batch, Y_batch = get_random_batch(X_train,y_train,kdd_new.index)
+        _, d_ls = sess.run([optimizer_d, loss_d], feed_dict={X: X_batch, y_label: Y_batch, noise: n})
+    if i%10==0:
+         X_tbatch, Y_tbatch = get_random_batch(X_test,y_test,kdd_test.index,5000)
+         y_pred = sess.run(y_real2,feed_dict={X_t:X_tbatch})
+         tmp = predict(Y_tbatch,y_pred)
+         if tmp>score:
+             score = tmp    
+    _, g_ls = sess.run([optimizer_g, loss_g], feed_dict={X: X_batch, y_label: Y_batch, noise: n})
+    
+    loss['d'].append(d_ls)
+    loss['g'].append(g_ls)
+
+print('best score:',score)
+plt.plot(loss['d'], label='Discriminator')
+plt.plot(loss['g'], label='Generator')
+plt.legend(loc='upper right')
+plt.savefig('Loss.png')
+plt.show()
+
