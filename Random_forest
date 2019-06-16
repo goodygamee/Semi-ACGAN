@@ -1,0 +1,86 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat May 11 15:56:20 2019
+
+@author: 玉强
+"""
+import pandas as pd
+import numpy as np
+
+
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.metrics import classification_report
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from operator import itemgetter
+
+
+kdd_new = pd.read_csv('D:/NNlearning/code/kddcup.data_new4',names=range(42))
+kdd_test = pd.read_csv('D:/NNlearning/code/kddcup.testdata_new4',names=range(42))
+kdd_test =kdd_test.drop([136488,136496],axis=0)
+
+#kdd_test = dropna_str(kdd_test)
+
+target = kdd_new[41]
+del kdd_new[41]
+#label_list=['normal.', 'buffer_overflow.', 'loadmodule.', 'perl.', 'neptune.', 'smurf.', \
+#     'guess_passwd.', 'pod.', 'teardrop.', 'portsweep.', 'ipsweep.', 'land.', 'ftp_write.', \
+#     'back.', 'imap.', 'satan.', 'phf.', 'nmap.', 'multihop.', 'warezmaster.', 'warezclient.', \
+#     'spy.', 'rootkit.']
+
+
+#X_train, X_test ,y_train,y_test = train_test_split(kdd_new,target,test_size=0.3,random_state=7)
+X_train = kdd_new
+y_train = target
+y_test = kdd_test[41]
+del kdd_test[41]
+X_test = kdd_test
+
+hot_enc = OneHotEncoder(categorical_features = [1,2,3,6,11,13,14,21],sparse=False)
+hot_enc.fit(X_train)
+
+X_train = hot_enc.transform(X_train)
+X_test = hot_enc.transform(X_test)
+
+def get_random_batch(X,Y,index,batch_size=1000):
+    np.random.seed(1234)
+    ind = np.random.choice(index,(batch_size))
+    X_batch = X[ind]
+    Y_batch = Y[ind]    
+    return X_batch, Y_batch
+
+X_train, y_train = get_random_batch(X_train,y_train,kdd_new.index,300)
+
+
+'''
+rf = RandomForestClassifier()
+n_iter = 20
+sqr_nf = 40
+param = {"n_estimators":np.random.randint(75,200,n_iter),
+           #"criterion":["gini","entropy"], 
+           #"max_features":[sqr_nf,sqr_nf*2,sqr_nf*3,sqr_nf+10]
+           }
+
+grid = RandomizedSearchCV(estimator=rf,
+                               param_distributions = param,
+                               n_iter=10,
+                               n_jobs=-1,
+                               cv=3,
+                               random_state=77)
+
+#rf = RandomForestClassifier(n_estimators=100)
+#rf.fit(X_train,y_train)
+grid.fit(X_train,y_train)
+scores = sorted(grid.grid_scores_,key=itemgetter(1),reverse=True)[:5]
+for m,score in enumerate(scores):
+    print( "M%d,Score = %0.3f" % (m+1,score.mean_validation_score))
+    print ("Param = {0}".format(score.parameters))
+'''
+
+rf = RandomForestClassifier(n_estimators=200,max_features=16)
+rf.fit(X_train,y_train)
+y_pred = rf.predict(X_test)
+
+print ("model:RandomForest \n", classification_report(y_test,y_pred))
+print ("Accuracy score:",accuracy_score(y_test, y_pred))
